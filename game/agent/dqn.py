@@ -84,7 +84,7 @@ class DQN(object):
 
 
 class DQNAgent(Agent):
-    """ Deep Q Network Agent
+    """ Deep Q Network Agent~
     It uses the Q-learning with Deep Learning as Q-function approximation.
     """
     def __init__(self, rows, cols,
