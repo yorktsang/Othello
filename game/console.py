@@ -3,6 +3,7 @@ from .agent.dqn import DQNAgent
 from .agent.manual import ManualAgent
 from .agent.minimax import MinimaxAgent, MinimaxABAgent
 from .agent.mcts import MCTSAgent
+from .agent.tldqn import TLDQNAgent
 
 
 def choose_agent(message, board_shape, sign):
@@ -16,6 +17,7 @@ def choose_agent(message, board_shape, sign):
         print('[4] MiniMax (Alpha Beta Pruning)')
         print('[5] Monte Carlo Tree Search')
         print('[6] Deep Q Network')
+        print('[7] Tensorlayer DQN')
         print_horizontal_line()
         try:
             number = eval(input('Enter [1-6]: '))
@@ -35,6 +37,9 @@ def choose_agent(message, board_shape, sign):
             if number == 6:
                 (rows, cols) = board_shape
                 return DQNAgent(rows, cols, sign, learning_on=False)
+            if number == 7:
+                (rows, cols) = board_shape
+                return TLDQNAgent(rows, cols, sign, learning_on=False)
         except Exception as e:
             print(e)
 

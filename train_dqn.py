@@ -1,17 +1,29 @@
 from game.framework.match import SimpleMatch
 from game.framework.state import State
 from game.agent.dqn import DQNAgent
+from game.agent.tldqn import TLDQNAgent
 from game.console import choose_agent
 from reversi import Reversi, create_board, Disc
 from collections import deque
-import time
+import time, random
 
 if __name__ == '__main__':
     board_size = (8, 8)
     (rows, cols) = board_size
-    black = choose_agent('Choose a black agent', board_size, Disc.BLACK.value)
+
+    is_dqn_play_white = True
+    if random.random() > 0.5:
+        is_dqn_play_white = False
+
     epsilon = input('DQN Epsilon [0.0 - 1.0]: ')
-    white = DQNAgent(rows,cols, Disc.WHITE.value, epsilon=float(epsilon))
+
+    if(is_dqn_play_white):
+        black = choose_agent('Choose a black agent', board_size, Disc.BLACK.value)
+        white = TLDQNAgent(rows, cols, Disc.WHITE.value, epsilon=float(epsilon))
+    else:
+        black = TLDQNAgent(rows, cols, Disc.BLACK.value, epsilon=float(epsilon))
+        white = choose_agent('Choose a white agent', board_size, Disc.WHITE.value)
+
     match = SimpleMatch(Reversi(black, white), logging_on=False)
     win_lose = deque([], 20)
     for i in range(1000):

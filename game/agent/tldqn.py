@@ -2,79 +2,90 @@ from .agent import Agent
 import random
 import numpy as np
 import tensorflow as tf
+import tensorlayer as tl
 import os.path
 from collections import deque
+import random, string
 
-FILE_DQN_LEARNING_ON = 'dqn_learning_on'
-FIlE_DQN_LEARNING_OFF = 'dqn_learning_off'
+def randomword(length):
+   letters = string.ascii_lowercase
+   return ''.join(random.choice(letters) for i in range(length))
+
+FILE_DQN_LEARNING_ON = 'dqn_learning_on.npz'
+FIlE_DQN_LEARNING_OFF = 'dqn_learning_off.npz'
 
 
-class DQN(object):
+class TLDQN(object):
     def __init__(self, rows, cols, learning_rate, learning_on):
+        self._sess = tf.InteractiveSession()
+        foldName = randomword(5)+"_"
         # features and labels
         x = tf.placeholder(tf.float32, [None, rows, cols])
         y = tf.placeholder(tf.float32, [None, rows, cols])
+        x_reshape = tf.reshape(x, [-1, rows, cols, 1])
+
         # TODO these are not generic but it works for reversi board size
-        # 1st convolution
-        conv_s1 = 4
-        conv_f1 = 32
-        conv_w1 = tf.Variable(tf.truncated_normal([conv_s1, conv_s1, 1, conv_f1]))
-        conv_b1 = tf.Variable(tf.truncated_normal([conv_f1]))
-        x1 = tf.reshape(x, [-1, rows, cols, 1])
-        c1 = tf.nn.relu(tf.nn.conv2d(x1, conv_w1, strides=[1, 1, 1, 1], padding='SAME') + conv_b1)
-        # 2nd convolution
-        conv_s2 = 4
-        conv_f2 = 16
-        conv_w2 = tf.Variable(tf.truncated_normal([conv_s2, conv_s2, conv_f1, conv_f2]))
-        conv_b2 = tf.Variable(tf.truncated_normal([conv_f2]))
-        c2 = tf.nn.relu(tf.nn.conv2d(c1, conv_w2, strides=[1, 1, 1, 1], padding='SAME') + conv_b2)
-        c2_size = np.product([s.value for s in c2.get_shape()[1:]])
-        # 1st fully connected
-        size = rows * cols
-        w1 = tf.Variable(tf.truncated_normal([c2_size, size]))
-        b1 = tf.Variable(tf.truncated_normal([size]))
-        h1 = tf.nn.relu(tf.matmul(tf.reshape(c2, [-1, c2_size]), w1) + b1)
-        # 2nd fully connected
-        w2 = tf.Variable(tf.truncated_normal([size, size]))
-        b2 = tf.Variable(tf.truncated_normal([size]))
-        h1_drop = tf.nn.dropout(h1, 0.6)
-        h2 = tf.nn.relu(tf.matmul(h1_drop, w2) + b2)
-        # output layer
-        w3 = tf.Variable(tf.truncated_normal([size, size]))
-        b3 = tf.Variable(tf.truncated_normal([size]))
-        prediction = tf.nn.tanh(tf.matmul(h2, w3) + b3)
-        # optimization
-        y1 = tf.reshape(y, [-1, size])
+
+        # transform to features vector
+        network = tl.layers.InputLayer(x_reshape, name=foldName + '_input_layer')
+        network = tl.layers.Conv2d(network, n_filter=32, filter_size=(4, 4), strides=(1, 1),
+                                   act=tf.nn.relu, padding='SAME', name=foldName + 'cnn1')
+        network = tl.layers.MaxPool2d(network, filter_size=(2, 2), strides=(2, 2),
+                                      padding='SAME', name=foldName + 'pool1')
+
+        network = tl.layers.Conv2d(network, n_filter=64, filter_size=(4, 4), strides=(1, 1),
+                                   act=tf.nn.relu, padding='SAME', name=foldName + 'cnn2')
+        network = tl.layers.MaxPool2d(network, filter_size=(2, 2), strides=(2, 2),
+                                      padding='SAME', name=foldName + 'pool2')
+
+        network = tl.layers.FlattenLayer(network, name=foldName + 'flatten')
+        #network = tl.layers.DropoutLayer(network, keep=0.9, name=foldName + 'drop1')
+
+        # transform to Deep Learning Layer
+        network = tl.layers.DenseLayer(network, n_units=128,W_init=tf.random_uniform_initializer(0, 0.01), b_init=None,
+                                       act=tf.nn.relu, name=foldName + 'relu1')
+        #network = tl.layers.DropoutLayer(network, keep=0.8, name=foldName + 'drop2')
+        network = tl.layers.DenseLayer(network, n_units=128,W_init=tf.random_uniform_initializer(0, 0.01), b_init=None,
+                                       act=tf.nn.relu, name=foldName + 'relu2')
+        #network = tl.layers.DropoutLayer(network, keep=0.8, name=foldName + 'drop3')
+        network = tl.layers.DenseLayer(network, n_units=64,
+                                       act=tf.identity,
+                                       name=foldName +'output')
+        prediction =  tf.nn.tanh(network.outputs)
+        y1 = tf.reshape(y, [-1, 64])
+        #cost = tl.cost.mean_squared_error(prediction, y1, is_mean=False)  # tf.reduce_sum(tf.square(nextQ - y))
         cost = tf.reduce_mean(tf.nn.l2_loss(prediction - y1))
-        optimizer = tf.train.AdamOptimizer(learning_rate).minimize(cost)
-        # for later use
+
+        optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, beta1=0.9, beta2=0.999,
+                                          epsilon=1e-08, use_locking=False).minimize(cost)
+        self._network = network
+
         self._x = x
         self._y = y
         self._prediction = tf.reshape(prediction, [rows, cols])
         self._optimizer = optimizer
         self._cost = cost
-        # session
-        config = tf.ConfigProto()
-        config.gpu_options.allow_growth = True
-        self._sess = tf.Session(config=config)
-        self._sess.run(tf.initialize_all_variables())
+
+        tl.layers.initialize_global_variables(self._sess)
+
         # persistence
         self._learning_on = learning_on
-        self._saver = tf.train.Saver([conv_w1, conv_b1, conv_w2, conv_b2, w1, b1, w2, b2, w3, b3])
         self._persistence_file = FILE_DQN_LEARNING_ON if learning_on else FIlE_DQN_LEARNING_OFF
-        self.load()
+        self.load(self._persistence_file)
 
-    def load(self):
-        print('Restoring from ' + self._persistence_file+".meta")
-        if os.path.isfile(self._persistence_file+".meta"):
-            self._saver.restore(self._sess, self._persistence_file)
+    def load(self, fileName):
+        print('Restoring from ' + fileName)
+        if os.path.isfile(fileName):
+            load_params = tl.files.load_npz(path='', name=fileName)
+            tl.files.assign_params(self._sess, load_params, self._network)
+            print('Restored ok')
 
     def save(self):
         if self._learning_on:
-            #print('Saving to '+ self._persistence_file)
-            self._saver.save(self._sess, self._persistence_file)
+            tl.files.save_npz(self._network.all_params, name=FILE_DQN_LEARNING_ON)
 
     def train(self, x, y):
+        #cost = self._sess.run([self._optimizer, self._cost], feed_dict={self._x: x, self._y: y})
         _, cost = self._sess.run([self._optimizer, self._cost], feed_dict={self._x: x, self._y: y})
         return cost
 
@@ -82,7 +93,7 @@ class DQN(object):
         return self._sess.run(self._prediction, feed_dict={self._x: x})
 
 
-class DQNAgent(Agent):
+class TLDQNAgent(Agent):
     """ Deep Q Network Agent~
     It uses the Q-learning with Deep Learning as Q-function approximation.
     """
@@ -93,7 +104,7 @@ class DQNAgent(Agent):
                  alpha=0.1,
                  gamma=1.0,
                  epsilon=0.0):
-        self._dqn = DQN(rows, cols, learning_rate, learning_on)
+        self._dqn = TLDQN(rows, cols, learning_rate, learning_on)
         self._sign = sign
         self._learning_on = learning_on
         self._alpha = alpha
@@ -164,7 +175,7 @@ class DQNAgent(Agent):
                 (1.0 - self._alpha) * self._prev_q_values[prev_row][prev_col] + \
                 self._alpha * reward
             self._costs.append(self._dqn.train(self._x, self._y))
-            print ('Epsilon: {:.3f} Cost: {:.2f}'.format(self._epsilon, sum(self._costs)/len(self._costs)))
+            print ('Epsilon: {:.5f} Cost: {:.5f}'.format(self._epsilon, sum(self._costs)/len(self._costs)))
             self._costs = []
             self._epsilon = max(self._epsilon - 0.001, 0.0)
             self._dqn.save()
